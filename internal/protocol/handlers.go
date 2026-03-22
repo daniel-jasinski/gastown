@@ -71,14 +71,6 @@ type WitnessHandler interface {
 
 	// HandleReworkRequest is called when a branch needs rebasing.
 	HandleReworkRequest(payload *ReworkRequestPayload) error
-
-	// HandleReviewPassed is called when a peer review polecat approves the MR.
-	// The Witness forwards MERGE_READY to the Refinery.
-	HandleReviewPassed(payload *ReviewPassedPayload) error
-
-	// HandleReviewFailed is called when a peer review polecat rejects the MR.
-	// The Witness sends FIX_NEEDED to the original polecat with findings.
-	HandleReviewFailed(payload *ReviewFailedPayload) error
 }
 
 // RefineryHandler defines the interface for Refinery protocol handlers.
@@ -114,22 +106,6 @@ func WrapWitnessHandlers(h WitnessHandler) *HandlerRegistry {
 			return err
 		}
 		return h.HandleReworkRequest(payload)
-	})
-
-	registry.Register(TypeReviewPassed, func(msg *mail.Message) error {
-		payload, err := ParseReviewPassedPayload(msg.Body)
-		if err != nil {
-			return err
-		}
-		return h.HandleReviewPassed(payload)
-	})
-
-	registry.Register(TypeReviewFailed, func(msg *mail.Message) error {
-		payload, err := ParseReviewFailedPayload(msg.Body)
-		if err != nil {
-			return err
-		}
-		return h.HandleReviewFailed(payload)
 	})
 
 	return registry
