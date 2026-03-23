@@ -142,6 +142,13 @@ echo '[{"depends_on_id":"gt-other1"},{"depends_on_id":"external:gt-abc:gt-abc123
 	}
 }
 
+// TestActivateConvoyBeadEmptyID verifies that activateConvoyBead is a no-op
+// when given an empty convoy ID.
+func TestActivateConvoyBeadEmptyID(t *testing.T) {
+	// Should not panic or call any external commands
+	activateConvoyBead("", "gastown")
+}
+
 // TestBdDepListRawIDsValidation verifies that bdDepListRawIDs rejects
 // invalid bead IDs to prevent SQL injection.
 func TestBdDepListRawIDsValidation(t *testing.T) {

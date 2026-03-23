@@ -257,6 +257,7 @@ func executeSling(params SlingParams) (*SlingResult, error) {
 				fmt.Printf("  %s Created convoy %s\n", style.Bold.Render("→"), convoyID)
 			}
 		} else {
+			convoyID = existingConvoy
 			fmt.Printf("  %s Already tracked by convoy %s\n", style.Dim.Render("○"), existingConvoy)
 		}
 	}
@@ -336,6 +337,9 @@ func executeSling(params SlingParams) (*SlingResult, error) {
 	}
 
 	fmt.Printf("  %s Work attached to %s\n", style.Bold.Render("✓"), spawnInfo.PolecatName)
+
+	// 7b. Activate convoy (transition to in_progress now that work is dispatched)
+	activateConvoyBead(convoyID, params.RigName)
 
 	// 8. Log sling event
 	actor := detectActor()

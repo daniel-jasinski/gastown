@@ -756,6 +756,7 @@ func runSling(cmd *cobra.Command, args []string) (retErr error) {
 
 	// Auto-convoy: check if issue is already tracked by a convoy
 	// If not, create one for dashboard visibility (unless --no-convoy is set)
+	slingConvoyID := ""
 	if !slingNoConvoy && formulaName == "" {
 		existingConvoy := isTrackedByConvoy(beadID)
 		if existingConvoy == "" {
@@ -771,6 +772,7 @@ func runSling(cmd *cobra.Command, args []string) (retErr error) {
 					// Log warning but don't fail - convoy is optional
 					fmt.Printf("%s Could not create auto-convoy: %v\n", style.Dim.Render("Warning:"), err)
 				} else {
+					slingConvoyID = convoyID
 					fmt.Printf("%s Created convoy 🚚 %s\n", style.Bold.Render("→"), convoyID)
 					fmt.Printf("  Tracking: %s\n", beadID)
 					if slingOwned {
@@ -782,6 +784,7 @@ func runSling(cmd *cobra.Command, args []string) (retErr error) {
 				}
 			}
 		} else {
+			slingConvoyID = existingConvoy
 			fmt.Printf("%s Already tracked by convoy %s\n", style.Dim.Render("○"), existingConvoy)
 		}
 	}
@@ -934,6 +937,9 @@ func runSling(cmd *cobra.Command, args []string) (retErr error) {
 	}
 
 	fmt.Printf("%s Work attached to hook (status=hooked)\n", style.Bold.Render("✓"))
+
+	// Activate convoy (transition to in_progress now that work is dispatched)
+	activateConvoyBead(slingConvoyID, "")
 
 	// Log sling event to activity feed
 	actor := detectActor()
