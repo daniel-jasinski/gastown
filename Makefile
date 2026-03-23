@@ -1,4 +1,4 @@
-.PHONY: build desktop-build desktop-run install safe-install check-forward-only clean test test-e2e-container check-up-to-date
+.PHONY: build desktop-build desktop-run install safe-install check-forward-only clean test test-e2e-container check-up-to-date sync-fork
 
 BINARY := gt
 BINARY_DESKTOP := gt-desktop
@@ -54,6 +54,11 @@ endif
 desktop-run:
 	go run ./cmd/gt-desktop
 
+sync-fork:
+ifndef SKIP_FORK_SYNC
+	@scripts/sync-fork.sh "$(CURDIR)" || echo "Warning: fork sync failed (non-fatal)"
+endif
+
 check-up-to-date:
 ifndef SKIP_UPDATE_CHECK
 	@# Skip check on detached HEAD (tag checkouts, CI builds)
@@ -94,7 +99,7 @@ ifndef SKIP_FORWARD_CHECK
 	fi
 endif
 
-install: check-up-to-date build
+install: sync-fork check-up-to-date build
 	@mkdir -p $(INSTALL_DIR)
 	@rm -f $(INSTALL_DIR)/$(BINARY)
 	@cp $(BUILD_DIR)/$(BINARY) $(INSTALL_DIR)/$(BINARY)
@@ -124,7 +129,7 @@ install: check-up-to-date build
 # safe-install: Replace binary WITHOUT restarting daemon or killing sessions.
 # Use this for automated rebuilds (e.g., rebuild-gt plugin). Sessions pick up
 # the new binary on their next natural cycle/handoff.
-safe-install: check-up-to-date check-forward-only build
+safe-install: sync-fork check-up-to-date check-forward-only build
 	@mkdir -p $(INSTALL_DIR)
 	@# Atomic-ish replace: copy to temp then move (move is atomic on same filesystem)
 	@cp $(BUILD_DIR)/$(BINARY) $(INSTALL_DIR)/$(BINARY).new

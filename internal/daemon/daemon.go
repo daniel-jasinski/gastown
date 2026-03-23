@@ -518,6 +518,18 @@ func (d *Daemon) Run() error {
 		d.logger.Printf("Main branch test ticker started (interval %v)", interval)
 	}
 
+	// Start fork sync dog ticker if configured.
+	// Periodically syncs fork/main with origin/main (upstream) for all fork-workflow rigs.
+	var forkSyncDogTicker *time.Ticker
+	var forkSyncDogChan <-chan time.Time
+	if IsPatrolEnabled(d.patrolConfig, "fork_sync_dog") {
+		interval := forkSyncDogInterval(d.patrolConfig)
+		forkSyncDogTicker = time.NewTicker(interval)
+		forkSyncDogChan = forkSyncDogTicker.C
+		defer forkSyncDogTicker.Stop()
+		d.logger.Printf("Fork sync dog ticker started (interval %v)", interval)
+	}
+
 	// Note: PATCH-010 uses per-session hooks in deacon/manager.go (SetAutoRespawnHook).
 	// Global pane-died hooks don't fire reliably in tmux 3.2a, so we rely on the
 	// per-session approach which has been tested to work for continuous recovery.
@@ -617,6 +629,13 @@ func (d *Daemon) Run() error {
 			// rig's main branch to catch regressions from merges or direct pushes.
 			if !d.isShutdownInProgress() {
 				d.runMainBranchTests()
+			}
+
+		case <-forkSyncDogChan:
+			// Fork sync dog — rebases fork/main onto origin/main (upstream)
+			// for rigs that use a fork workflow.
+			if !d.isShutdownInProgress() {
+				d.runForkSyncDog()
 			}
 
 		case <-timer.C:

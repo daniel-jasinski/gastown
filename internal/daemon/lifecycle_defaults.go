@@ -11,6 +11,7 @@ package daemon
 //   - JSONL Git Backup: every 15m
 //   - Dolt Filesystem Backup: every 15m
 //   - Scheduled Maintenance (FLATTEN): daily at 03:00, threshold 1000
+//   - Fork Sync Dog: every 1h, rebase fork onto upstream
 //   - Main Branch Test: every 30m, 10m timeout per rig
 func DefaultLifecycleConfig() *DaemonPatrolConfig {
 	threshold := 1000
@@ -57,6 +58,10 @@ func DefaultLifecycleConfig() *DaemonPatrolConfig {
 				Enabled:     true,
 				IntervalStr: "30m",
 				TimeoutStr:  "10m",
+			},
+			ForkSyncDog: &ForkSyncDogConfig{
+				Enabled:     true,
+				IntervalStr: "1h",
 			},
 			Handler: &PatrolConfig{
 				Enabled: true,
@@ -116,6 +121,10 @@ func EnsureLifecycleDefaults(config *DaemonPatrolConfig) bool {
 	}
 	if p.MainBranchTest == nil {
 		p.MainBranchTest = d.MainBranchTest
+		changed = true
+	}
+	if p.ForkSyncDog == nil {
+		p.ForkSyncDog = d.ForkSyncDog
 		changed = true
 	}
 	if p.Handler == nil {
