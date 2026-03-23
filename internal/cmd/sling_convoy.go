@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/telemetry"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -422,4 +423,25 @@ func createAutoConvoy(beadID, beadTitle string, owned bool, mergeStrategy, baseB
 	}
 
 	return convoyID, nil
+}
+
+// activateConvoyBead updates a convoy bead's status to in_progress after
+// a tracked issue has been dispatched. This closes the gap where the dashboard
+// shows a convoy as "waiting/unassigned" despite work being actively processed.
+// Best-effort: warns on failure but does not fail the sling operation.
+func activateConvoyBead(convoyID, rigName string) {
+	if convoyID == "" {
+		return
+	}
+
+	townRoot, err := workspace.FindFromCwd()
+	if err != nil {
+		return
+	}
+	townBeads := filepath.Join(townRoot, ".beads")
+
+	if err := BdCmd("update", convoyID, "--status=in_progress").
+		Dir(townBeads).WithAutoCommit().Run(); err != nil {
+		fmt.Printf("  %s Could not activate convoy %s: %v\n", style.Dim.Render("Warning:"), convoyID, err)
+	}
 }
