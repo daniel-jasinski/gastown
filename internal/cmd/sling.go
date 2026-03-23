@@ -1099,15 +1099,28 @@ func tryAcquireSlingBeadLock(townRoot, beadID string) (func(), error) {
 
 	safeBeadID := strings.NewReplacer("/", "_", ":", "_").Replace(beadID)
 	lockPath := filepath.Join(lockDir, safeBeadID+".flock")
-	release, locked, err := lock.FlockTryAcquire(lockPath)
-	if err != nil {
-		return nil, fmt.Errorf("acquiring sling lock for bead %s: %w", beadID, err)
-	}
-	if !locked {
-		return nil, fmt.Errorf("bead %s is already being slung; retry after the current assignment completes", beadID)
+
+	// Retry with backoff to handle transient contention from daemon/witness
+	// dispatch racing with CLI slings (gt-4lwj). When slinging multiple beads
+	// to the same rig in sequence, wakeRigAgents can trigger concurrent dispatch
+	// that briefly holds the per-bead lock. A few retries resolve this without
+	// failing the CLI sling with a false "already being slung" error.
+	const maxAttempts = 6
+	const retryInterval = 250 // milliseconds
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		release, locked, err := lock.FlockTryAcquire(lockPath)
+		if err != nil {
+			return nil, fmt.Errorf("acquiring sling lock for bead %s: %w", beadID, err)
+		}
+		if locked {
+			return release, nil
+		}
+		if attempt < maxAttempts {
+			time.Sleep(time.Duration(retryInterval) * time.Millisecond)
+		}
 	}
 
-	return release, nil
+	return nil, fmt.Errorf("bead %s is already being slung; retry after the current assignment completes", beadID)
 }
 
 // tryAcquireSlingAssigneeLock acquires a per-assignee file lock to serialize concurrent

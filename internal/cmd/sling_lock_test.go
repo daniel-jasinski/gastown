@@ -21,6 +21,7 @@ func TestTryAcquireSlingBeadLock_Contention(t *testing.T) {
 		t.Fatalf("first lock acquire failed: %v", err)
 	}
 
+	// Second acquire should fail after exhausting retries (lock still held).
 	release2, err := tryAcquireSlingBeadLock(townRoot, beadID)
 	if err == nil {
 		release2()
@@ -37,6 +38,75 @@ func TestTryAcquireSlingBeadLock_Contention(t *testing.T) {
 		t.Fatalf("expected lock acquire to succeed after release: %v", err)
 	}
 	release3()
+}
+
+func TestTryAcquireSlingBeadLock_TransientContention(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("advisory flock is a no-op on Windows")
+	}
+	t.Parallel()
+
+	townRoot := t.TempDir()
+	beadID := "gt-transient456"
+
+	// Simulate transient contention: hold lock briefly in a goroutine,
+	// then release. The retry loop in tryAcquireSlingBeadLock should
+	// eventually acquire the lock (gt-4lwj).
+	var wg sync.WaitGroup
+	lockAcquired := make(chan struct{})
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		release, err := tryAcquireSlingBeadLock(townRoot, beadID)
+		if err != nil {
+			t.Errorf("goroutine lock acquire failed: %v", err)
+			return
+		}
+		close(lockAcquired)
+		// Hold lock briefly — released immediately after signal so the
+		// main goroutine's retry loop exercises at least one retry.
+		release()
+	}()
+
+	<-lockAcquired
+
+	// The goroutine released the lock after signaling. The main goroutine
+	// should succeed after a brief retry.
+	release2, err := tryAcquireSlingBeadLock(townRoot, beadID)
+	if err != nil {
+		t.Fatalf("expected lock acquire to succeed after transient contention: %v", err)
+	}
+	release2()
+
+	wg.Wait()
+}
+
+func TestTryAcquireSlingBeadLock_DifferentBeads(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("advisory flock is a no-op on Windows")
+	}
+	t.Parallel()
+
+	townRoot := t.TempDir()
+
+	// Different beads should not block each other (gt-4lwj regression guard).
+	release1, err := tryAcquireSlingBeadLock(townRoot, "gt-bead1")
+	if err != nil {
+		t.Fatalf("first bead lock failed: %v", err)
+	}
+	defer release1()
+
+	release2, err := tryAcquireSlingBeadLock(townRoot, "gt-bead2")
+	if err != nil {
+		t.Fatalf("second bead lock should not be blocked by first: %v", err)
+	}
+	defer release2()
+
+	release3, err := tryAcquireSlingBeadLock(townRoot, "gt-bead3")
+	if err != nil {
+		t.Fatalf("third bead lock should not be blocked by first two: %v", err)
+	}
+	defer release3()
 }
 
 func TestTryAcquireSlingAssigneeLock_Serialization(t *testing.T) {
