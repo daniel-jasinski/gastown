@@ -1,0 +1,408 @@
+description = """
+Design pipeline with self-review, peer-review, and mandatory user approval gate.
+
+This formula guides a polecat through producing a design document, reviewing it
+adversarially (both self-review and peer-review by a fresh polecat), and presenting
+the polished result for human approval. Agents maximize quality autonomously so the
+user reviews polished, peer-reviewed work — not a first draft.
+
+## When to Use
+
+NOT every bead needs design. Use this pipeline when:
+- New feature touching multiple components
+- Trade-off between approaches needs evaluation
+- Change to public API or data model
+- Uncertain scope or ambiguous requirements
+
+Skip design (use implementation pipeline directly) when:
+- Single-file bug fix with obvious cause
+- Small, well-scoped change with clear approach
+
+## Pipeline Flow
+
+```
+1. Designer loads context and understands the work unit
+2. Designer produces structured Design Document:
+   - Problem statement, approach, alternatives, impact, edge cases
+3. Designer SELF-REVIEWS before submitting:
+   - Bias check, genuine alternatives, strongest counter-argument
+4. Submit for PEER-REVIEW (fresh polecat):
+   - Adversarial review against problem statement
+   - Accept or push back with specific concerns
+5. Address feedback → resubmit with fresh reviewer (max 2 rounds)
+6. If no agreement → escalate to user with both positions
+7. >>> USER APPROVAL GATE <<<
+   - Approve → feeds into planning or implementation
+   - Reject with feedback → back to design
+   - Redirect → different approach entirely
+```
+
+## Key Principle
+
+Design is the ONLY pipeline with a mandatory human gate because design decisions
+compound. A wrong design leads to wrong planning leads to wrong implementation.
+Catching it at design costs minutes; catching it after implementation costs hours.
+
+## Output
+
+Approved design document persisted to the bead's --design field. Feeds into:
+- Planning pipeline (if the design needs decomposition into multiple units)
+- Implementation pipeline (if the design is a single implementable unit)
+
+## Variables
+
+| Variable | Source | Description |
+|----------|--------|-------------|
+| issue | hook_bead | The issue ID requiring a design decision |
+
+## Failure Modes
+
+| Situation | Action |
+|-----------|--------|
+| Requirements unclear | Mail Witness for clarification |
+| Peer reviewer disagrees after 2 rounds | Escalate to user with both positions |
+| User rejects design | Incorporate feedback, restart from produce-design |
+| Context filling | Use gt handoff to cycle to fresh session |"""
+formula = "mol-design-pipeline"
+type = "workflow"
+version = 1
+
+[[steps]]
+id = "load-context"
+title = "Load context and understand the design problem"
+description = """
+Initialize your session and understand what needs a design decision.
+
+**1. Prime your environment:**
+```bash
+gt prime                    # Load role context
+bd prime                    # Load beads context
+```
+
+**2. Check your hook:**
+```bash
+gt hook               # Shows your pinned molecule and hook_bead
+```
+
+The hook_bead is your assigned issue. Read it carefully:
+```bash
+bd show {{issue}}           # Full issue details
+```
+
+**3. Understand the design problem:**
+- What needs to change and why?
+- What components are affected?
+- What constraints exist (technical, timeline, compatibility)?
+- Are there existing patterns in the codebase to follow or break from?
+- Has anyone attempted this before? Check bead history.
+
+**4. Research the codebase:**
+Explore relevant code to understand the current architecture:
+```bash
+# Find related files, understand existing patterns
+# Read interfaces, data models, and API surfaces that will be affected
+```
+
+**5. Check for prior context:**
+```bash
+gt mail inbox               # Any handoff notes or context
+```
+
+If the bead has notes from a prior attempt, read them carefully.
+
+**Exit criteria:** You understand the problem, the affected components, the existing
+architecture, and the constraints. You can articulate why a design decision is needed."""
+
+[[steps]]
+id = "produce-design"
+title = "Produce the design document"
+needs = ["load-context"]
+description = """
+Create a structured design document exploring the problem and proposing a solution.
+
+**Your design document MUST follow this structure:**
+
+```markdown
+## Problem
+<What needs to change and why — from the bead>
+
+## Approach
+<What will change, which components, how they interact>
+
+## Alternatives Considered
+
+### Alternative A: <description>
+- Pros: ...
+- Cons: ...
+- Why not: <specific reason>
+
+### Alternative B: <description>
+- Pros: ...
+- Cons: ...
+- Why not: <specific reason>
+
+(Minimum 2 alternatives. More is better for complex problems.)
+
+## Architectural Fit
+<How this fits with existing codebase patterns and conventions>
+
+## Impact Analysis
+<What existing behavior changes, what could break>
+
+## Edge Cases and Failure Modes
+<What happens when things go wrong>
+```
+
+**Working principles:**
+- Consider at least 2 genuine alternatives (not strawmen)
+- Be specific about trade-offs — vague "it depends" is not helpful
+- Ground the design in the actual codebase, not abstract ideals
+- Show your work: reference specific files, functions, and patterns
+- Keep it concise — depth on trade-offs, not length for its own sake
+
+**Persist immediately (session survival):**
+```bash
+bd update {{issue}} --design "<your design document>"
+```
+
+Do this BEFORE proceeding. If your session dies, the design survives.
+
+**Exit criteria:** Design document persisted to the bead via --design. Covers problem,
+approach, alternatives (min 2), architectural fit, impact, and edge cases."""
+
+[[steps]]
+id = "self-review"
+title = "Self-review the design"
+needs = ["produce-design"]
+description = """
+Review your own design adversarially before submitting for peer review.
+The goal is to catch your own biases and blind spots.
+
+**Answer these questions honestly:**
+
+1. **Bias check:** Is my preferred approach influenced by what I know best,
+   or what's genuinely best for the problem?
+2. **Genuine alternatives:** Did I genuinely consider alternatives, or just
+   listed them to dismiss?
+3. **Strongest counter-argument:** What's the strongest argument for a
+   different approach? Can I steel-man an alternative?
+4. **Over-engineering check:** Am I over-engineering? Is there a simpler
+   approach I dismissed too quickly?
+5. **Architectural fit:** Does this fit the existing architecture, or am I
+   fighting against it? If fighting, is that justified?
+6. **Scope check:** Am I solving the right problem? Am I solving more than
+   what was asked?
+
+**For each question, if you find an issue:**
+- Fix it in the design document
+- Update the bead: `bd update {{issue}} --design "<updated design>"`
+
+**Add a Self-Review section to the bottom of your design:**
+
+```markdown
+## Self-Review
+- Strongest argument against this approach: ...
+- Simplest possible alternative: ...
+- Am I solving the right problem: ...
+- Bias risk: <what expertise/familiarity might be biasing the choice>
+```
+
+**Persist the updated design:**
+```bash
+bd update {{issue}} --design "<design with self-review section>"
+```
+
+**Exit criteria:** Design document includes a Self-Review section. You have honestly
+evaluated your own biases. Any issues found during self-review are fixed."""
+
+[[steps]]
+id = "peer-review"
+title = "Submit for peer review and address feedback"
+needs = ["self-review"]
+description = """
+Dispatch a fresh polecat to adversarially review your design. Process their
+feedback. If pushback, iterate with a fresh reviewer (max 2 rounds total).
+
+**Round 1 — Dispatch peer reviewer:**
+
+```bash
+gt sling --prompt="You are a design reviewer. Adversarially review this design.
+
+Read the design:
+bd show {{issue}}    # The --design field contains the design document
+
+## Your Review Mandate
+
+Review the design against these criteria:
+1. **Problem-solution fit**: Does the approach actually solve the stated problem?
+2. **Alternatives fairness**: Were alternatives genuinely evaluated or dismissed as strawmen?
+3. **Architectural fit**: Does this fit the codebase architecture? Reference specific patterns.
+4. **Edge cases**: Are the failure modes realistic and complete? What's missing?
+5. **Impact completeness**: Does the impact analysis cover all affected components?
+6. **Simplicity**: Is this the simplest approach that solves the problem?
+
+## Self-Review Your Own Objections
+
+Before sending your review, check yourself:
+- Am I objecting based on preference or substance?
+- Is my alternative actually better, or just different?
+- Am I nitpicking or raising real concerns?
+
+## Your Output
+
+Respond with one of:
+- **ACCEPT**: Design is sound. Note any minor suggestions.
+- **PUSHBACK**: Specific concerns that need addressing. For each concern:
+  - What's wrong
+  - Why it matters
+  - What you'd suggest instead
+
+Mail your review back when done." --mail-back
+```
+
+**Wait for review:**
+```bash
+gt mail inbox       # Wait for peer reviewer to report back
+```
+
+**Process the review:**
+
+If **ACCEPT**: Proceed to user-approval step.
+
+If **PUSHBACK**:
+1. Read each concern carefully
+2. For each concern, either:
+   - Fix it in the design (update via `bd update {{issue}} --design "..."`)
+   - Disagree with justification (note why in the design)
+3. If you made changes, update the design on the bead
+
+**Round 2 (if needed) — Only if Round 1 had PUSHBACK:**
+
+Dispatch a FRESH reviewer (not the same one) with the updated design:
+```bash
+gt sling --prompt="You are a design reviewer (round 2). A previous reviewer
+had concerns that have been addressed. Review the UPDATED design.
+
+Read the design:
+bd show {{issue}}    # The --design field contains the updated design
+
+Previous reviewer's concerns were addressed. Check:
+1. Were the concerns adequately resolved?
+2. Did the fixes introduce new problems?
+3. Is the design now sound?
+
+Self-review your own objections before sending.
+
+Respond with ACCEPT or PUSHBACK (same format as above).
+Mail your review back when done." --mail-back
+```
+
+**After Round 2:**
+- If ACCEPT: Proceed to user-approval
+- If PUSHBACK again: Escalate to user with both positions:
+  ```bash
+  bd update {{issue}} --notes "ESCALATION: Design disagreement after 2 review rounds.
+  Designer position: <your rationale>
+  Reviewer position: <their concerns>
+  Recommend user decides."
+  ```
+  Then proceed to user-approval with the escalation noted.
+
+**Exit criteria:** Peer review complete. Design either accepted or escalated with
+both positions documented. Updated design persisted to bead."""
+
+[[steps]]
+id = "user-approval"
+title = "Present design for user approval"
+needs = ["peer-review"]
+description = """
+Present the polished, peer-reviewed design to the human for approval.
+This is a mandatory human gate — no design proceeds without user sign-off.
+
+**1. Read the final design:**
+```bash
+bd show {{issue}}    # Read the --design field
+```
+
+**2. Present the design in conversation:**
+
+Output the following directly to the human:
+
+```
+## Design Review: {{issue}}
+
+<paste the full design document from the bead's --design field>
+
+---
+
+### Review Status
+- Self-reviewed: Yes
+- Peer-reviewed: <ACCEPTED / ESCALATED — include summary>
+<if escalated, include both positions>
+
+### Decision Needed
+Please review and respond with one of:
+1. **APPROVE** — Design proceeds to implementation/planning
+2. **REJECT <feedback>** — Specific changes needed (I'll revise and re-review)
+3. **REDIRECT** — This needs a fundamentally different approach
+```
+
+**3. Await human response:**
+Wait for the human to respond in this conversation. They will type their
+decision directly. Do NOT use `gt mail inbox` — the reply comes in chat.
+
+**4. Process the decision:**
+
+- **APPROVE**: Proceed to finalize step.
+- **REJECT with feedback**: Incorporate feedback, go back to produce-design step.
+  Update the design with feedback, re-run self-review and peer-review.
+  (In practice: revise the design, update via `bd update {{issue}} --design "..."`,
+  then dispatch a new peer reviewer.)
+- **REDIRECT**: The human wants a fundamentally different approach. Note the
+  redirect reason, go back to produce-design with the new direction.
+
+**Exit criteria:** Human has approved the design, OR you are looping back to
+revise based on rejection/redirect feedback."""
+
+[[steps]]
+id = "finalize"
+title = "Finalize approved design and signal completion"
+needs = ["user-approval"]
+description = """
+Persist the approved design and signal completion.
+
+**1. Verify the approved design is persisted:**
+```bash
+bd show {{issue}}    # Confirm --design field has the approved document
+```
+
+If the design is not yet persisted:
+```bash
+bd update {{issue}} --design "<approved design document>"
+```
+
+**2. Update bead notes with approval status:**
+```bash
+bd update {{issue}} --notes "Design APPROVED by user.
+Review summary:
+- Self-reviewed: Yes
+- Peer-reviewed: <ACCEPTED/rounds completed>
+- User: APPROVED
+Next: feeds into planning or implementation pipeline."
+```
+
+**3. Signal completion:**
+
+This design task produces no code changes — the deliverable is the approved
+design document persisted to the bead.
+
+```bash
+gt done --cleanup-status clean
+```
+
+**Exit criteria:** Approved design persisted to bead. Completion signaled."""
+
+[vars]
+[vars.issue]
+description = "The issue ID requiring a design decision"
+required = true
