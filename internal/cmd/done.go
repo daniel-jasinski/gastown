@@ -347,6 +347,7 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 	// For COMPLETED, we need an issue ID and branch must not be the default branch
 	var mrID string
 	var pushFailed bool
+	var pushedToFork bool // true when branch was pushed to fork remote (origin push failed)
 	var mrFailed bool
 	var doneErrors []string
 	var convoyInfo *ConvoyInfo // Populated if issue is tracked by a convoy
@@ -569,6 +570,7 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 		// Pre-declare push variables for checkpoint goto (gt-aufru)
 		var refspec string
 		var pushErr error
+		var verifyRemote string
 
 		// Resume: skip push if already completed in a previous run (gt-aufru)
 		if checkpoints[CheckpointPushed] != "" {
@@ -625,8 +627,30 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 			}
 		}
 
+		// All origin push attempts failed — try fork remote as fallback (gt-zxc1).
+		// The fork remote typically uses HTTPS and has push permissions for the
+		// contributor's fork. When SSH auth fails for origin, HTTPS to fork often works.
 		if pushErr != nil {
-			// All push attempts failed
+			remotes, remotesErr := g.Remotes()
+			if remotesErr == nil {
+				for _, r := range remotes {
+					if r == "fork" {
+						style.PrintWarning("all origin pushes failed — trying fork remote...")
+						pushErr = g.Push("fork", refspec, false)
+						if pushErr != nil {
+							style.PrintWarning("fork push also failed: %v", pushErr)
+						} else {
+							pushedToFork = true
+							fmt.Printf("%s Branch pushed via fork remote fallback\n", style.Bold.Render("✓"))
+						}
+						break
+					}
+				}
+			}
+		}
+
+		if pushErr != nil {
+			// All push attempts failed (origin + fork)
 			pushFailed = true
 			errMsg := fmt.Sprintf("push failed for branch '%s': %v", branch, pushErr)
 			doneErrors = append(doneErrors, errMsg)
@@ -637,7 +661,11 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 		// Verify the branch actually exists on remote (GH #1348).
 		// Push can return exit 0 without actually pushing (e.g., stale refs,
 		// worktree/bare-repo state mismatch). Verify before creating MR bead.
-		if exists, verifyErr := g.RemoteBranchExists("origin", branch); verifyErr != nil {
+		verifyRemote = "origin"
+		if pushedToFork {
+			verifyRemote = "fork"
+		}
+		if exists, verifyErr := g.RemoteBranchExists(verifyRemote, branch); verifyErr != nil {
 			style.PrintWarning("could not verify push: %v (proceeding optimistically)", verifyErr)
 		} else if !exists {
 			// Push "succeeded" but branch not on remote — try bare repo verification
@@ -646,17 +674,42 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 			bareRepoPath := filepath.Join(rigPath, ".repo.git")
 			if _, statErr := os.Stat(bareRepoPath); statErr == nil {
 				bareGit := git.NewGitWithDir(bareRepoPath, "")
-				exists, verifyErr = bareGit.RemoteBranchExists("origin", branch)
+				exists, verifyErr = bareGit.RemoteBranchExists(verifyRemote, branch)
+			}
+			// If not found on origin, try fork remote (gt-zxc1).
+			// Origin's push URL may point to the fork (SSH) while its fetch URL
+			// points to upstream — so the push succeeds but verification against
+			// the fetch URL fails. Check the fork remote before giving up.
+			if !pushedToFork && (verifyErr != nil || !exists) {
+				remotes, remotesErr := g.Remotes()
+				if remotesErr == nil {
+					for _, r := range remotes {
+						if r == "fork" {
+							forkExists, forkErr := g.RemoteBranchExists("fork", branch)
+							if forkErr == nil && forkExists {
+								exists = true
+								verifyErr = nil
+								pushedToFork = true
+								fmt.Printf("%s Branch verified on fork remote (origin push URL likely targets fork)\n", style.Bold.Render("→"))
+							}
+							break
+						}
+					}
+				}
 			}
 			if verifyErr != nil || !exists {
 				pushFailed = true
-				errMsg := fmt.Sprintf("push appeared to succeed but branch '%s' not found on remote", branch)
+				errMsg := fmt.Sprintf("push appeared to succeed but branch '%s' not found on remote %s", branch, verifyRemote)
 				doneErrors = append(doneErrors, errMsg)
 				style.PrintWarning("%s\nThis may indicate a stale git context. Witness will be notified.", errMsg)
 				goto notifyWitness
 			}
 		}
-		fmt.Printf("%s Branch pushed to origin\n", style.Bold.Render("✓"))
+		if pushedToFork {
+			fmt.Printf("%s Branch pushed to fork\n", style.Bold.Render("✓"))
+		} else {
+			fmt.Printf("%s Branch pushed to origin\n", style.Bold.Render("✓"))
+		}
 
 		// Fix cleanup_status after successful push (gt-wcr).
 		// Status was detected before push, so "unpushed" is now stale.
@@ -870,6 +923,9 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 			}
 			if agentBeadID != "" {
 				description += fmt.Sprintf("\nagent_bead: %s", agentBeadID)
+			}
+			if pushedToFork {
+				description += "\npush_remote: fork"
 			}
 
 			// Add conflict resolution tracking fields (initialized, updated by Refinery)
